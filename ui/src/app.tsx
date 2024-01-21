@@ -1,7 +1,11 @@
 import './app.css'
 import { signal, useSignal } from '@preact/signals'
-
 import ReconnectingWebSocket from "reconnecting-websocket";
+import TimeAgo from 'javascript-time-ago'
+import TimeAgoLocaleEn from 'javascript-time-ago/locale/en'
+
+TimeAgo.addDefaultLocale(TimeAgoLocaleEn)
+const timeFormatter = new TimeAgo("en-US");
 
 const LOCAL_RTSP_URL_KEY = "last-rtsp-url";
 
@@ -71,13 +75,13 @@ export function App() {
       return `Frame count too low; suggested interval=${(sigDuration.value*60/120).toFixed(1)} or less`
     }
 
-    return `The timelapse will be ${(frames / 24).toFixed(1)} seconds long.`
+    return `The timelapse will be ${(frames / 24).toFixed(1)} seconds long at 24fps.`
   }
 
   return (
     <div>
       <div className="params">
-        <table>
+        <table width="100%">
           <tbody>
             <tr>
               <td>Interval (s)</td>
@@ -99,7 +103,7 @@ export function App() {
         </table>
         <button onClick={start}>Start</button>
       </div>
-      <table className="history">
+      <table className="history" width="100%">
       <thead>
         <tr>
           <th>Created</th>
@@ -113,8 +117,8 @@ export function App() {
         const progressPercentage = (frames - remaining) * 100 / frames ;
         const remainingMinutes = remaining * interval / 60;
         return <tr key={timelapse_id}>
-          <td>{created}</td>
-          <td>{updated}</td>
+          <td>{timeFormatter.format(created*1000)}</td>
+          <td>{timeFormatter.format(updated*1000)}</td>
           <td>{interval} s</td>
           <td>{progressPercentage.toFixed(1)}% ({remainingMinutes.toFixed(1)} m remaining)</td>
         </tr>
