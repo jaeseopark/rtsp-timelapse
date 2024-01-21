@@ -1,0 +1,31 @@
+upstream ui {
+    server ui;
+}
+
+upstream api {
+    server api;
+}
+
+server {
+    listen 80;
+
+    location / {
+        proxy_pass http://ui;
+    }
+
+    location /api/ {
+        rewrite /api/(.*) /$1 break;
+        proxy_pass http://api;
+
+        proxy_read_timeout 300;
+        proxy_connect_timeout 300;
+        proxy_send_timeout 300;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    location /template-assets/ {
+        rewrite /template-assets/(.*) /$1 break;
+        root /templates;
+    }
+}

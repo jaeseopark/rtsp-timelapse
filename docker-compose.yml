@@ -1,0 +1,36 @@
+version: "3"
+services:
+  nginx:
+    image: nginx
+    volumes:
+      - ./nginx/templates/dev.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./mnt/data/timelapses:/data/timelapses:ro
+    ports:
+      - "9276:80"
+    depends_on:
+      - "ui"
+      - "api"
+    environment:
+      TZ: America/Denver
+  ui:
+    image: node:21
+    working_dir: /app/ui
+    command: sh -c "yarn install && yarn dev"
+    volumes:
+      - ./ui:/app/ui
+    environment:
+      TZ: America/Denver
+  api:
+    image: rtsp-timelapse-api:latest
+    build:
+      context: api
+    working_dir: /app/api
+    stop_signal: SIGINT # https://github.com/docker/compose/issues/4199#issuecomment-426109482
+    command: uvicorn main:fastapi_app --reload --host 0.0.0.0 --port 80
+    volumes:
+      - ./api:/app/api
+      - ./mnt/config.json:/app/config.json
+      - ./mnt/data:/data
+      - ./mnt/logs:/var/log
+    environment:
+      TZ: America/Denver
