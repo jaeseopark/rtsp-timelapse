@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 import time
 from typing import Any, Callable, Dict
@@ -16,9 +15,8 @@ from apprise import Apprise
 logger = logging.getLogger("rtsp-timelapse")
 apprise_instance = Apprise()
 
-with open("/app/config.json") as fp:
-    for service in json.load(fp).get("notifications", []):
-        apprise_instance.add(service)
+for target in (os.getenv("APPRISE_TARGETS") or "").split(","):
+    apprise_instance.add(target.strip())
 
 
 class Timelapse:
@@ -28,43 +26,46 @@ class Timelapse:
         self.rtsp_url = rtsp_url
         self.is_active = False
 
-    def run(self, interval: float, frames: int, callback: Callable = None, progress: Callable[[int], None] = None, block=False):
+    def run(self, interval: float, frames: int, callback: Callable, progress: Callable[[int], None], block=False):
         self.is_active = True
 
         os.makedirs(self.snapshot_dir, exist_ok=True)
         os.makedirs(self.output_dir, exist_ok=True)
 
-        self._run(end_callback=callback, interval=interval,
+        self._run(callback=callback, interval=interval,
                   remaining=frames, progress=progress)
         if block:
             self.wait()
 
-    def _run(self, interval: float, remaining: int, end_callback: Callable = None, progress: Callable[[int], None] = None):
-        if remaining == 0:
-            self.is_active = False
-            if end_callback:
-                end_callback()
-            return
-
+    def _run(self, interval: float, remaining: int, callback: Callable, progress: Callable[[int], None]):
         def next_run():
-            if progress:
-                logger.info("progress function exists; calling...")
-                progress(remaining - 1)
-            self._run(interval=interval, remaining=remaining -
-                      1, end_callback=end_callback, progress=progress)
+            if remaining == 0:
+                self.is_active = False
+                callback()
+                return
+
+            next_remaining = remaining - 1
+            self._run(
+                interval=interval,
+                remaining=next_remaining,
+                callback=callback,
+                progress=progress
+            )
             self._take_snapshot()
+            progress(next_remaining)
 
         threading.Timer(interval, next_run).start()
 
     def _take_snapshot(self):
         filename = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}.png"
+        full_path = os.path.join(self.snapshot_dir, filename)
         subprocess.run([
             "ffmpeg",
             "-i", self.rtsp_url,
             "-vframes", "1",
-            os.path.join(self.snapshot_dir, filename)
+            full_path
         ])
-        logger.info(f"A frame was saved as: {filename}")
+        logger.info(f"A frame was saved as: {full_path}")
 
     def wait(self, interval=5):
         while True:
@@ -127,7 +128,6 @@ def submit(rtsp_url: str, interval: float, frames: int, progress: Callable[[Dict
     )
 
     def _progress(remaining: int):
-        logger.info("entering inner progress function")
         timelapse.update(dict(remaining=remaining, updated=int(time.time())))
         asyncio.run(progress(timelapse))
 

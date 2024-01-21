@@ -55,6 +55,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 async def broadcast(timelapse: dict):
     for socket in sockets:
+        logger.info(f"Broadcasting to: {socket.client.host=}")
         await socket.send_text(json.dumps(timelapse))
 
 

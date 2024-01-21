@@ -3,6 +3,8 @@ import { signal, useSignal } from '@preact/signals'
 
 import ReconnectingWebSocket from "reconnecting-websocket";
 
+const LOCAL_RTSP_URL_KEY = "last-rtsp-url";
+
 type Timelapse = {
   timelapse_id: string;
   created:number;
@@ -23,10 +25,16 @@ socket.onmessage = (({data}) => {
   ];
 })
 
+const getLastRtspUrl = () => {
+  const url = localStorage.getItem(LOCAL_RTSP_URL_KEY)
+  return url || "rtsp://PLACEHOLDER/stream1";
+}
+
 export function App() {
   const sigInterval = useSignal(10);
-  const sigFrames = useSignal(6);
-  const sigRtspUrl = useSignal("rtsp://PLACEHOLDER/stream1");
+  const sigDuration = useSignal(20);
+  const sigRtspUrl = useSignal(getLastRtspUrl());
+  const frames = Math.ceil(sigDuration.value * 60 / sigInterval.value);
   
   const start = () => {
     fetch("/api/timelapses", {
@@ -38,24 +46,33 @@ export function App() {
       body: JSON.stringify({
         url: sigRtspUrl.value,
         interval: sigInterval.value,
-        frames: sigFrames.value
+        frames: frames
       }),
     }).then((res) => res.json())
     .then(({timelapse}) => {
       console.log("Timelapse started", timelapse);
       // @ts-ignore
       timelapses.value = [...timelapses.value, timelapse]
+      localStorage.setItem(LOCAL_RTSP_URL_KEY, sigRtspUrl.value);
     })
   }
 
   // @ts-ignore
-  const updateInterval = ({target}) => {sigInterval.value = target.value;};
+  const updateInterval = ({target}) => {sigInterval.value = parseFloat(target.value);};
 
   // @ts-ignore
-  const updateFrames = ({target}) => {sigFrames.value = target.value;};
+  const updateDuration = ({target}) => {sigDuration.value = parseFloat(target.value);};
 
   // @ts-ignore
   const updateUrl = ({target}) => {sigRtspUrl.value = target.value;};
+
+  const getIntervalMessage = () => {
+    if (frames < 120) {
+      return `Frame count too low; suggested interval=${(sigDuration.value*60/120).toFixed(1)} or less`
+    }
+
+    return `The timelapse will be ${(frames / 24).toFixed(1)} seconds long.`
+  }
 
   return (
     <div>
@@ -64,11 +81,15 @@ export function App() {
           <tbody>
             <tr>
               <td>Interval (s)</td>
-              <td><input type="number" value={sigInterval.value} onChange={updateInterval} /></td>
+              <td><input type="number" value={sigInterval.value} min={0} step={.1} onChange={updateInterval} /></td>
             </tr>
             <tr>
-              <td>Frames</td>
-              <td><input type="number" value={sigFrames.value} onChange={updateFrames} /></td>
+              <td />
+              <td> <span className="interval-message">{getIntervalMessage()}</span></td>
+              </tr>
+            <tr>
+              <td>Duration (m)</td>
+              <td><input type="number" value={sigDuration.value} min={1} step={.1} onChange={updateDuration} /></td>
             </tr>
             <tr>
               <td>URL</td>
@@ -95,7 +116,7 @@ export function App() {
           <td>{created}</td>
           <td>{updated}</td>
           <td>{interval} s</td>
-          <td>{progressPercentage.toFixed(1)}% ({remainingMinutes.toFixed(1)}m remaining)</td>
+          <td>{progressPercentage.toFixed(1)}% ({remainingMinutes.toFixed(1)} m remaining)</td>
         </tr>
 })}
       </tbody>
