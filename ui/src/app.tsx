@@ -48,14 +48,37 @@ export function App() {
     })
   }
 
+  // @ts-ignore
+  const updateInterval = ({target}) => {sigInterval.value = target.value;};
+
+  // @ts-ignore
+  const updateFrames = ({target}) => {sigFrames.value = target.value;};
+
+  // @ts-ignore
+  const updateUrl = ({target}) => {sigRtspUrl.value = target.value;};
+
   return (
     <div>
       <div className="params">
-        <label>Interval: {sigInterval.value} s</label>
-        <label>Frames: {sigFrames.value}</label>
+        <table>
+          <tbody>
+            <tr>
+              <td>Interval (s)</td>
+              <td><input type="number" value={sigInterval.value} onChange={updateInterval} /></td>
+            </tr>
+            <tr>
+              <td>Frames</td>
+              <td><input type="number" value={sigFrames.value} onChange={updateFrames} /></td>
+            </tr>
+            <tr>
+              <td>URL</td>
+              <td><input type="text" style={{"minWidth": "400px"}} value={sigRtspUrl.value} onChange={updateUrl} /></td>
+            </tr>
+          </tbody>
+        </table>
         <button onClick={start}>Start</button>
       </div>
-      <table>
+      <table className="history">
       <thead>
         <tr>
           <th>Created</th>
