@@ -67,3 +67,9 @@ def create_timelapse(payload: Dict[Any, Any]):
         payload.get("frames"),
         progress=broadcast
     ))
+
+
+@fastapi_app.delete("/timelapses/{timelapse_id}")
+def delete_timelapse(timelapse_id: str):
+    timelapse.cancel(timelapse_id)
+    return dict(result="success")

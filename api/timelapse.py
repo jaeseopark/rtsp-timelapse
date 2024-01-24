@@ -12,49 +12,57 @@ from hashlib import sha256
 
 from apprise import Apprise
 
+CANCELLING_CODE = -2
+CANCELLED_CODE = -1
+
 logger = logging.getLogger("rtsp-timelapse")
 apprise_instance = Apprise()
+timelapses = dict()
 
 for target in (os.getenv("APPRISE_TARGETS") or "").split(","):
-    apprise_instance.add(target.strip())
+    if target.strip():
+        apprise_instance.add(target.strip())
 
 
 class Timelapse:
-    def __init__(self, snapshot_dir: str, output_dir: str, rtsp_url: str) -> None:
+    def __init__(self, timelapse_id: str, frames: int, interval: float, snapshot_dir: str, output_dir: str, rtsp_url: str, callback: Callable, progress: Callable) -> None:
+        self.timelapse_id = timelapse_id
         self.snapshot_dir = snapshot_dir
         self.output_dir = output_dir
         self.rtsp_url = rtsp_url
+        self.frames = frames
+        self.interval = interval
+        self.created = int(time.time())
+        self.callback = callback
+        self._progress = progress
         self.is_active = False
 
-    def run(self, interval: float, frames: int, callback: Callable, progress: Callable[[int], None], block=False):
+    def run(self, block=False):
         self.is_active = True
 
         os.makedirs(self.snapshot_dir, exist_ok=True)
         os.makedirs(self.output_dir, exist_ok=True)
 
-        self._run(callback=callback, interval=interval,
-                  remaining=frames, progress=progress)
+        self._run(remaining=self.frames)
         if block:
             self.wait()
 
-    def _run(self, interval: float, remaining: int, callback: Callable, progress: Callable[[int], None]):
+    def _run(self, remaining: int):
         def next_run():
+            if not self.is_active:
+                logger.info("Timelapse cancelled. Calling progress with the cancellation code...")
+                return self.progress(CANCELLED_CODE)
+    
             if remaining == 0:
                 self.is_active = False
-                callback()
-                return
+                return self.callback()
 
             next_remaining = remaining - 1
-            self._run(
-                interval=interval,
-                remaining=next_remaining,
-                callback=callback,
-                progress=progress
-            )
+            self._run(remaining=next_remaining,)
             self._take_snapshot()
-            progress(next_remaining)
+            self.progress(next_remaining)
 
-        threading.Timer(interval, next_run).start()
+        threading.Timer(self.interval, next_run).start()
 
     def _take_snapshot(self):
         filename = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}.png"
@@ -67,15 +75,35 @@ class Timelapse:
         ])
         logger.info(f"A frame was saved as: {full_path}")
 
-    def wait(self, interval=5):
+    def wait(self, retry_interval=5):
         while True:
             if not self.is_active:
                 break
 
-            time.sleep(interval)
+            time.sleep(retry_interval)
+
+    def cancel(self):
+        # Do not really need to worry about thread-safety in the current implementation.
+        self.is_active = False
+
+    def to_dict(self, remaining: int) -> dict:
+        return dict(
+            timelapse_id=self.timelapse_id,
+            rtsp_url_hash=sha256(self.rtsp_url.encode('utf-8')).hexdigest(),
+            created=self.created,
+            updated=int(time.time()),
+            interval=self.interval,
+            frames=self.frames,
+            remaining=remaining
+        )
+
+    def progress(self, remaining: int):
+        logger.info(f"Reporting progress with {remaining=} ...")
+        dct = self.to_dict(remaining=remaining)
+        asyncio.run(self._progress(dct))
 
 
-def create_timelapse(timelapse_id: str, input_dir: str, output_dir: str):
+def create_video(timelapse_id: str, input_dir: str, output_dir: str):
     """
     :returns: The path of the timelapse video
     """
@@ -112,26 +140,26 @@ def submit(rtsp_url: str, interval: float, frames: int, progress: Callable[[Dict
     output_dir = "/data/timelapses"
 
     def post_process():
-        timelapse_path = create_timelapse(
+        timelapse_path = create_video(
             timelapse_id, snapshot_dir, output_dir)
         send_video(timelapse_path)
         empty_folder(snapshot_dir)
 
-    timelapse = dict(
-        timelapse_id=timelapse_id,
-        rtsp_url_hash=sha256(rtsp_url.encode('utf-8')).hexdigest(),
-        created=int(time.time()),
-        updated=int(time.time()),
-        interval=interval,
-        frames=frames,
-        remaining=frames
-    )
+    timelapse = Timelapse(timelapse_id=timelapse_id, snapshot_dir=snapshot_dir,
+                          output_dir=output_dir, rtsp_url=rtsp_url, progress=progress,
+                          interval=interval, frames=frames, callback=post_process)
+    timelapse.run()
 
-    def _progress(remaining: int):
-        timelapse.update(dict(remaining=remaining, updated=int(time.time())))
-        asyncio.run(progress(timelapse))
+    timelapses[timelapse_id] = timelapse
 
-    Timelapse(snapshot_dir=snapshot_dir, output_dir=output_dir, rtsp_url=rtsp_url) \
-        .run(interval=interval, frames=frames, callback=post_process, progress=_progress)
+    return timelapse.to_dict(frames)
 
-    return timelapse
+
+def cancel(timelapse_id: str) -> None:
+    timelapse = timelapses.get(timelapse_id)
+    assert timelapse, f"{timelapse_id=} must exist"
+
+    # Note: setting the progress code first to avoid race conditions where the "cancelled" message gets sent out to the clients before "cancelling"
+    timelapse.progress(CANCELLING_CODE)
+    timelapse.cancel()
+
