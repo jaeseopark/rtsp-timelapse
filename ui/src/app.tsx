@@ -4,6 +4,7 @@ import { timelapses } from "./state";
 import History from "./history";
 
 const LOCAL_RTSP_URL_KEY = "last-rtsp-url";
+const FPS = 24;
 
 const getLastRtspUrl = () => {
   const url = localStorage.getItem(LOCAL_RTSP_URL_KEY);
@@ -11,10 +12,11 @@ const getLastRtspUrl = () => {
 };
 
 const Params = () => {
-  const sigInterval = useSignal(10);
-  const sigDuration = useSignal(20);
+  const sigVideoDuration = useSignal(8); // seconds
+  const sigPrintDuration = useSignal(60); // minutes
   const sigRtspUrl = useSignal(getLastRtspUrl());
-  const frames = Math.ceil((sigDuration.value * 60) / sigInterval.value);
+  const frames = Math.ceil(sigVideoDuration.value * FPS);
+  const interval = (sigPrintDuration.value * 60) / frames;
 
   const start = () => {
     fetch("/api/timelapses", {
@@ -25,7 +27,7 @@ const Params = () => {
       },
       body: JSON.stringify({
         url: sigRtspUrl.value,
-        interval: sigInterval.value,
+        interval: interval,
         frames: frames,
       }),
     })
@@ -39,13 +41,13 @@ const Params = () => {
   };
 
   // @ts-ignore
-  const updateInterval = ({ target }) => {
-    sigInterval.value = parseFloat(target.value);
+  const updateVideoDuration = ({ target }) => {
+    sigVideoDuration.value = parseFloat(target.value);
   };
 
   // @ts-ignore
   const updateDuration = ({ target }) => {
-    sigDuration.value = parseFloat(target.value);
+    sigPrintDuration.value = parseFloat(target.value);
   };
 
   // @ts-ignore
@@ -53,12 +55,13 @@ const Params = () => {
     sigRtspUrl.value = target.value;
   };
 
-  const getIntervalMessage = () => {
-    if (frames < 120) {
-      return `Frame count too low; suggested interval=${((sigDuration.value * 60) / 120).toFixed(1)} or less`;
+  const getIntervalMessage = (): string => {
+    if (interval < 5) {
+      // alternative implementation: https://gist.github.com/alfonsrv/a788f8781fb1616e81a6b9cebf1ea2fa
+      return `Interval (${interval} s) too low; RTSP server may not be fast enough to create this timelapse.`;
     }
 
-    return `The timelapse will be ${(frames / 24).toFixed(1)} seconds long at 24fps.`;
+    return `The interval will be ${interval} s at ${FPS} fps.`;
   };
 
   return (
@@ -66,14 +69,14 @@ const Params = () => {
       <table width="100%">
         <tbody>
           <tr>
-            <td>Interval (s)</td>
+            <td>Timelapse Duration (s)</td>
             <td>
               <input
                 type="number"
-                value={sigInterval.value}
+                value={sigVideoDuration.value}
                 min={0}
                 step={0.1}
-                onChange={updateInterval}
+                onChange={updateVideoDuration}
               />
             </td>
           </tr>
@@ -84,11 +87,11 @@ const Params = () => {
             </td>
           </tr>
           <tr>
-            <td>Duration (m)</td>
+            <td>Capture Duration (m)</td>
             <td>
               <input
                 type="number"
-                value={sigDuration.value}
+                value={sigPrintDuration.value}
                 min={1}
                 step={0.1}
                 onChange={updateDuration}

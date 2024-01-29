@@ -1,4 +1,5 @@
 # built-in modules
+import asyncio
 import json
 import logging
 from typing import Any, Dict, List
@@ -53,10 +54,13 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.info("Socket closed")
 
 
-async def broadcast(timelapse: dict):
-    for socket in sockets:
-        logger.info(f"Broadcasting to: {socket.client.host=}")
-        await socket.send_text(json.dumps(timelapse))
+def broadcast(timelapse: dict):
+    async def _broadcast():
+        for socket in sockets:
+            logger.info(f"Broadcasting to: {socket.client.host=}")
+            await socket.send_text(json.dumps(timelapse))
+
+    asyncio.run(_broadcast())
 
 
 @fastapi_app.post("/timelapses")
@@ -65,7 +69,7 @@ def create_timelapse(payload: Dict[Any, Any]):
         payload.get("url"),
         payload.get("interval"),
         payload.get("frames"),
-        progress=broadcast
+        broadcast=broadcast
     ))
 
 

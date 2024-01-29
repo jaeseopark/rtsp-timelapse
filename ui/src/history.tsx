@@ -37,19 +37,22 @@ const History = () => {
         <tr>
           <th>Created</th>
           <th>Updated</th>
-          <th>Interval</th>
-          <th>Progress</th>
+          <th>Capture Duration</th>
+          <th>Status</th>
         </tr>
       </thead>
       <tbody>
         {timelapses.value.map(
           ({ timelapse_id, created, updated, frames, interval, remaining }) => {
-            const getProgressCell = () => {
+            const getStatusCell = (): string | JSX.Element => {
               if (remaining === CANCELLED_CODE) {
-                return <td>Cancelled</td>;
+                return "Cancelled";
               }
               if (remaining === CANCELLING_CODE) {
-                return <td>Cancelling...</td>;
+                return "Cancelling...";
+              }
+              if (remaining === 0) {
+                return "100%";
               }
 
               const handleCancelClick = () =>
@@ -60,21 +63,36 @@ const History = () => {
                 });
 
               const remainingMinutes = (remaining * interval) / 60;
-              const text = `${progressPercentage.toFixed(1)}% (${remainingMinutes.toFixed(1)} m remaining`;
+              const progressPercentage = ((frames - remaining) * 100) / frames;
+              const text = `${progressPercentage.toFixed(1)}% (${remainingMinutes.toFixed(1)} m remaining)`;
               return (
-                <td>
+                <>
                   <span>{text}</span>
-                  <button onClick={handleCancelClick}>Cancel</button>
-                </td>
+                  {progressPercentage < 100 && (
+                    <button
+                      style={{ marginLeft: "5px" }}
+                      onClick={handleCancelClick}
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </>
               );
             };
-            const progressPercentage = ((frames - remaining) * 100) / frames;
             return (
               <tr key={timelapse_id}>
-                <td>{timeFormatter.format(created * 1000)}</td>
-                <td>{timeFormatter.format(updated * 1000)}</td>
-                <td>{interval} s</td>
-                {getProgressCell()}
+                <td style={{ paddingInline: "1em", textAlign: "center" }}>
+                  {timeFormatter.format(created * 1000)}
+                </td>
+                <td style={{ paddingInline: "1em", textAlign: "center" }}>
+                  {timeFormatter.format(updated * 1000)}
+                </td>
+                <td style={{ paddingInline: "1em", textAlign: "center" }}>
+                  {((interval * frames) / 60).toFixed()} m
+                </td>
+                <td style={{ paddingInline: "1em", textAlign: "center" }}>
+                  {getStatusCell()}
+                </td>
               </tr>
             );
           },

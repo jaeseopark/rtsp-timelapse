@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import time
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, List
 import os
 import subprocess
 from datetime import datetime
@@ -25,7 +25,7 @@ for target in (os.getenv("APPRISE_TARGETS") or "").split(","):
 
 
 class Timelapse:
-    def __init__(self, timelapse_id: str, frames: int, interval: float, snapshot_dir: str, output_dir: str, rtsp_url: str, callback: Callable, progress: Callable) -> None:
+    def __init__(self, timelapse_id: str, frames: int, interval: float, snapshot_dir: str, output_dir: str, rtsp_url: str, callback: Callable) -> None:
         self.timelapse_id = timelapse_id
         self.snapshot_dir = snapshot_dir
         self.output_dir = output_dir
@@ -33,8 +33,7 @@ class Timelapse:
         self.frames = frames
         self.interval = interval
         self.created = int(time.time())
-        self.callback = callback
-        self._progress = progress
+        self._callback = callback
         self.is_active = False
 
     def run(self, block=False):
@@ -50,17 +49,18 @@ class Timelapse:
     def _run(self, remaining: int):
         def next_run():
             if not self.is_active:
-                logger.info("Timelapse cancelled. Calling progress with the cancellation code...")
-                return self.progress(CANCELLED_CODE)
-    
+                logger.info(
+                    "Timelapse cancelled. Calling progress with the cancellation code...")
+                return self.report_progress(CANCELLED_CODE)
+
             if remaining == 0:
                 self.is_active = False
-                return self.callback()
+                return
 
             next_remaining = remaining - 1
-            self._run(remaining=next_remaining,)
+            self._run(remaining=next_remaining)
             self._take_snapshot()
-            self.progress(next_remaining)
+            self.report_progress(next_remaining)
 
         threading.Timer(self.interval, next_run).start()
 
@@ -97,10 +97,10 @@ class Timelapse:
             remaining=remaining
         )
 
-    def progress(self, remaining: int):
-        logger.info(f"Reporting progress with {remaining=} ...")
+    def report_progress(self, remaining: int):
+        logger.info(f"Reporting progress with {remaining=}")
         dct = self.to_dict(remaining=remaining)
-        asyncio.run(self._progress(dct))
+        self._callback(dct)
 
 
 def create_video(timelapse_id: str, input_dir: str, output_dir: str):
@@ -134,20 +134,22 @@ def empty_folder(dir: str) -> str:
         os.remove(f)
 
 
-def submit(rtsp_url: str, interval: float, frames: int, progress: Callable[[Dict], None]) -> Dict[str, Any]:
+def submit(rtsp_url: str, interval: float, frames: int, broadcast: Callable) -> Dict[str, Any]:
     timelapse_id = str(uuid.uuid4())
     snapshot_dir = os.path.join("/tmp", "snapshots", timelapse_id)
     output_dir = "/data/timelapses"
 
-    def post_process():
-        timelapse_path = create_video(
-            timelapse_id, snapshot_dir, output_dir)
-        send_video(timelapse_path)
-        empty_folder(snapshot_dir)
+    def callback(dct: Dict):
+        if dct["remaining"] == 0:
+            path = create_video(timelapse_id, snapshot_dir, output_dir)
+            send_video(path)
+            empty_folder(snapshot_dir)
+
+        broadcast(dct)
 
     timelapse = Timelapse(timelapse_id=timelapse_id, snapshot_dir=snapshot_dir,
-                          output_dir=output_dir, rtsp_url=rtsp_url, progress=progress,
-                          interval=interval, frames=frames, callback=post_process)
+                          output_dir=output_dir, rtsp_url=rtsp_url, callback=callback,
+                          interval=interval, frames=frames)
     timelapse.run()
 
     timelapses[timelapse_id] = timelapse
@@ -160,6 +162,9 @@ def cancel(timelapse_id: str) -> None:
     assert timelapse, f"{timelapse_id=} must exist"
 
     # Note: setting the progress code first to avoid race conditions where the "cancelled" message gets sent out to the clients before "cancelling"
-    timelapse.progress(CANCELLING_CODE)
+    timelapse.report_progress(CANCELLING_CODE)
     timelapse.cancel()
 
+
+def get_recent(limit: 10) -> List[dict]:
+    return [t.to_dict(remaining=t.frames) for t in timelapses][:limit]
